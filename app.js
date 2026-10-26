@@ -2,25 +2,55 @@
    ExamFlow — Main Application Logic
    ======================================== */
 
+// ── Default Starter Questions ─────────────────────────────────────────────
+const DEFAULT_QUESTIONS = [
+  {
+    question: '1 + 1 มีค่าเท่ากับเท่าไร?',
+    choices: ['1', '2', '3', '4'],
+    answer: 1, // 0-based: choice 2
+  },
+  {
+    question: 'เมืองหลวงของประเทศไทยคือเมืองใด?',
+    choices: ['กรุงเทพมหานคร', 'เชียงใหม่', 'ขอนแก่น', 'ภูเก็ต'],
+    answer: 0,
+  },
+  {
+    question: 'โลกมีดวงจันทร์เป็นบริวารตามธรรมชาติกี่ดวง?',
+    choices: ['0 ดวง', '1 ดวง', '2 ดวง', '3 ดวง'],
+    answer: 1,
+  },
+  {
+    question: 'H2O เป็นสูตรทางเคมีของสารใดต่อไปนี้?',
+    choices: ['เกลือแกง', 'น้ำบริสุทธิ์', 'น้ำตาลทราย', 'เอทานอล'],
+    answer: 1,
+  },
+  {
+    question: 'หน่วยความจำหลักของคอมพิวเตอร์คืออะไร?',
+    choices: ['RAM', 'Hard Disk', 'Flash Drive', 'CD-ROM'],
+    answer: 0,
+  },
+];
+
 // ── State ─────────────────────────────────────────────────────────────────
 const state = {
-  questions: [],          // { question, choices: [], answer: number (0-based) }
+  questions: [],          // [{ question, choices: [], answer: 0 }]
   examConfig: {
-    title: 'ข้อสอบออนไลน์',
+    title: 'ข้อสอบวัดความรู้ทั่วไป',
     timeLimitMinutes: null,
     passingPercent: 60,
     shuffle: false,
   },
   exam: {
-    displayQuestions: [], // Possibly shuffled copy
+    displayQuestions: [],
     answers: {},          // { qIndex: choiceIndex }
     currentIndex: 0,
-    student: { name: '', id: '', class: '' },
+    student: { id: '', name: '' },
     startTime: null,
     timerInterval: null,
     secondsLeft: null,
   },
-  results: [],            // Array of past results
+  results: [],            // Array of past test results
+  isTeacher: false,
 };
 
 // ── DOM Helpers ────────────────────────────────────────────────────────────
@@ -29,26 +59,143 @@ const $$ = (sel, ctx = document) => [...ctx.querySelectorAll(sel)];
 
 function showToast(msg, type = 'info', duration = 3000) {
   const t = $('#toast');
+  if (!t) return;
   t.textContent = msg;
   t.className = `toast ${type} show`;
   setTimeout(() => { t.className = 'toast'; }, duration);
 }
 
+// ── LocalStorage Management ────────────────────────────────────────────────
+const STORAGE_KEY_QS     = 'examFlow_questions_v2';
+const STORAGE_KEY_CONFIG = 'examFlow_config_v2';
+const STORAGE_KEY_RES    = 'examFlow_results_v2';
+const STORAGE_KEY_THEME  = 'examFlow_theme_v2';
+
+function loadStoredState() {
+  try {
+    const savedQs = localStorage.getItem(STORAGE_KEY_QS);
+    if (savedQs) {
+      state.questions = JSON.parse(savedQs);
+    } else {
+      state.questions = [...DEFAULT_QUESTIONS];
+      localStorage.setItem(STORAGE_KEY_QS, JSON.stringify(state.questions));
+    }
+
+    const savedCfg = localStorage.getItem(STORAGE_KEY_CONFIG);
+    if (savedCfg) {
+      state.examConfig = Object.assign(state.examConfig, JSON.parse(savedCfg));
+    }
+
+    const savedRes = localStorage.getItem(STORAGE_KEY_RES);
+    if (savedRes) {
+      state.results = JSON.parse(savedRes);
+    }
+  } catch (err) {
+    console.warn('LocalStorage error:', err);
+    state.questions = [...DEFAULT_QUESTIONS];
+  }
+}
+
+function saveStoredState() {
+  try {
+    localStorage.setItem(STORAGE_KEY_QS, JSON.stringify(state.questions));
+    localStorage.setItem(STORAGE_KEY_CONFIG, JSON.stringify(state.examConfig));
+    localStorage.setItem(STORAGE_KEY_RES, JSON.stringify(state.results));
+  } catch (err) {
+    console.warn('LocalStorage save error:', err);
+  }
+  updateHomeSummary();
+}
+
+// ── Theme Support ─────────────────────────────────────────────────────────
+(function initTheme() {
+  const saved = localStorage.getItem(STORAGE_KEY_THEME);
+  if (saved === 'dark') {
+    document.body.classList.add('dark-theme');
+    const btn = $('#themeToggleBtn');
+    if (btn) btn.textContent = '🌙';
+  } else {
+    document.body.classList.remove('dark-theme');
+    const btn = $('#themeToggleBtn');
+    if (btn) btn.textContent = '☀️';
+  }
+})();
+
+$('#themeToggleBtn').addEventListener('click', () => {
+  const isDark = document.body.classList.toggle('dark-theme');
+  $('#themeToggleBtn').textContent = isDark ? '🌙' : '☀️';
+  localStorage.setItem(STORAGE_KEY_THEME, isDark ? 'dark' : 'light');
+});
+
+// ── Navigation ────────────────────────────────────────────────────────────
 function showPage(n) {
   $$('.page').forEach(p => p.classList.remove('active'));
-  $(`#page${n}`).classList.add('active');
+  const target = $(`#page${n}`);
+  if (target) target.classList.add('active');
+
+  // Update step navigation if in teacher mode
   $$('.step-item').forEach(s => {
     const sn = +s.dataset.step;
     s.classList.toggle('active', sn === n);
     s.classList.toggle('done', sn < n);
   });
+
+  // Scroll to top
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+
+  if (n === 0) updateHomeSummary();
+  if (n === 4) updateReport();
 }
 
-// ── Particles ──────────────────────────────────────────────────────────────
+function setTeacherMode(enabled) {
+  state.isTeacher = !!enabled;
+  const badge = $('#roleBadge');
+  const loginBtn = $('#teacherLoginBtn');
+  const controlGroup = $('#teacherControlGroup');
+  const stepNav = $('#stepNav');
+  const goToReportBtn = $('#goToReportBtn');
+
+  if (state.isTeacher) {
+    badge.textContent = '👨‍🏫 โหมดอาจารย์';
+    badge.className = 'role-badge teacher';
+    loginBtn.style.display = 'none';
+    controlGroup.style.display = 'inline-flex';
+    stepNav.style.display = 'flex';
+    if (goToReportBtn) goToReportBtn.style.display = 'inline-flex';
+  } else {
+    badge.textContent = '🎓 โหมดนักศึกษา';
+    badge.className = 'role-badge';
+    loginBtn.style.display = 'inline-flex';
+    controlGroup.style.display = 'none';
+    stepNav.style.display = 'none';
+    if (goToReportBtn) goToReportBtn.style.display = 'none';
+  }
+}
+
+// ── Update Home Summary ───────────────────────────────────────────────────
+function updateHomeSummary() {
+  const title = state.examConfig.title || 'ข้อสอบออนไลน์';
+  const qCount = state.questions.length;
+  const time = state.examConfig.timeLimitMinutes;
+
+  $('#homeExamTitle').textContent = title;
+  $('#homeQCount').textContent = `${qCount} ข้อ`;
+  $('#homeTimeLimit').textContent = time ? `${time} นาที` : 'ไม่จำกัดเวลา';
+  $('#homePassing').textContent = `${state.examConfig.passingPercent}%`;
+
+  // Sync inputs on Teacher page
+  if ($('#examTitle')) $('#examTitle').value = title;
+  if ($('#examTime')) $('#examTime').value = time || '';
+  if ($('#passingScore')) $('#passingScore').value = state.examConfig.passingPercent;
+  if ($('#shuffleQuestions')) $('#shuffleQuestions').checked = !!state.examConfig.shuffle;
+}
+
+// ── Particle Background ───────────────────────────────────────────────────
 (function initParticles() {
   const container = $('#particles');
-  const colors = ['#7c3aed', '#2563eb', '#059669', '#a78bfa', '#60a5fa'];
-  for (let i = 0; i < 25; i++) {
+  if (!container) return;
+  const colors = ['#6366f1', '#2563eb', '#10b981', '#818cf8', '#60a5fa'];
+  for (let i = 0; i < 20; i++) {
     const p = document.createElement('div');
     p.className = 'particle';
     const size = Math.random() * 6 + 2;
@@ -64,14 +211,14 @@ function showPage(n) {
   }
 })();
 
-// ── SVG gradient defs (for ring) ──────────────────────────────────────────
+// ── SVG Gradient for Ring ─────────────────────────────────────────────────
 (function injectDefs() {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.innerHTML = `
     <defs>
       <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-        <stop offset="0%"   stop-color="#7c3aed"/>
-        <stop offset="100%" stop-color="#2563eb"/>
+        <stop offset="0%"   stop-color="#6366f1"/>
+        <stop offset="100%" stop-color="#4f46e5"/>
       </linearGradient>
     </defs>
   `;
@@ -81,10 +228,111 @@ function showPage(n) {
 })();
 
 // ══════════════════════════════════════════════════════════════════════════
-//  PAGE 1 — IMPORT
+//  PAGE 0 — PORTAL & STUDENT DIRECT ENTRANCE
 // ══════════════════════════════════════════════════════════════════════════
 
-// ── Sample CSV ─────────────────────────────────────────────────────────────
+// Student starts exam with Student ID
+$('#quickStartExamBtn').addEventListener('click', enterExamAsStudent);
+$('#quickStudentId').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') enterExamAsStudent();
+});
+
+function enterExamAsStudent() {
+  const studentId = $('#quickStudentId').value.trim();
+  if (!studentId) {
+    showToast('กรุณากรอกรหัสนักศึกษาก่อนเริ่มทำข้อสอบ', 'error');
+    $('#quickStudentId').focus();
+    return;
+  }
+
+  if (state.questions.length === 0) {
+    showToast('ยังไม่มีข้อสอบในระบบ กรุณารออาจารย์นำเข้าข้อสอบ', 'error');
+    return;
+  }
+
+  // Set student info
+  state.exam.student = {
+    id: studentId,
+    name: studentId,
+  };
+
+  // Directly start the exam!
+  startExam();
+}
+
+// Home button
+$('#navHomeBtn').addEventListener('click', () => showPage(0));
+$('#headerLogo').addEventListener('click', () => showPage(0));
+$('#returnHomeBtn').addEventListener('click', () => {
+  $('#quickStudentId').value = '';
+  showPage(0);
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+//  TEACHER AUTHENTICATION (LOGIN / LOGOUT)
+// ══════════════════════════════════════════════════════════════════════════
+const teacherModal = $('#teacherLoginModal');
+const teacherPassInput = $('#teacherPasswordInput');
+
+function openTeacherLoginModal() {
+  teacherModal.style.display = 'flex';
+  teacherPassInput.value = '';
+  teacherPassInput.focus();
+}
+
+function closeTeacherLoginModal() {
+  teacherModal.style.display = 'none';
+}
+
+$('#teacherLoginBtn').addEventListener('click', openTeacherLoginModal);
+$('#enterTeacherBtn').addEventListener('click', openTeacherLoginModal);
+$('#closeTeacherModalBtn').addEventListener('click', closeTeacherLoginModal);
+
+$('#submitTeacherLoginBtn').addEventListener('click', handleTeacherLogin);
+teacherPassInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') handleTeacherLogin();
+});
+
+function handleTeacherLogin() {
+  const pwd = teacherPassInput.value.trim();
+  // Default password: admin (or 1234)
+  if (pwd === 'admin' || pwd === '1234' || pwd === '') {
+    setTeacherMode(true);
+    closeTeacherLoginModal();
+    showToast('เข้าสู่ระบบอาจารย์สำเร็จ ยินดีต้อนรับครับ', 'success');
+    renderPreview();
+    showPage(1); // Go to teacher exam management
+  } else {
+    showToast('รหัสผ่านไม่ถูกต้อง (รหัสเริ่มต้น: admin)', 'error');
+    teacherPassInput.select();
+  }
+}
+
+// Teacher Logout
+$('#teacherLogoutBtn').addEventListener('click', () => {
+  setTeacherMode(false);
+  showToast('ออกจากระบบอาจารย์เรียบร้อยแล้ว', 'info');
+  showPage(0);
+});
+
+// Teacher views Student Portal
+$('#viewStudentBtn').addEventListener('click', () => showPage(0));
+$('#viewStudentViewBtn').addEventListener('click', () => showPage(0));
+
+// Step Navigation clicks for teacher
+$$('.step-item').forEach(item => {
+  item.addEventListener('click', () => {
+    if (!state.isTeacher) return;
+    const step = +item.dataset.step;
+    showPage(step);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+//  PAGE 1 — IMPORT & QUESTION BUILDER (TEACHER)
+// ══════════════════════════════════════════════════════════════════════════
+
+// ── Sample CSV Download ──────────────────────────────────────────────────
 $('#downloadSampleBtn').addEventListener('click', () => {
   const csv = [
     'ข้อ,คำถาม,ตัวเลือก1,ตัวเลือก2,ตัวเลือก3,ตัวเลือก4,เฉลย',
@@ -95,7 +343,7 @@ $('#downloadSampleBtn').addEventListener('click', () => {
     '5,ปีที่มีวันน้อยที่สุดในสัปดาห์คือวันอะไร,วันจันทร์,วันอาทิตย์,วันเสาร์,วันศุกร์,1',
   ].join('\n');
   download('sample_exam.csv', csv, 'text/csv;charset=utf-8;');
-  showToast('ดาวน์โหลดตัวอย่างสำเร็จ', 'success');
+  showToast('ดาวน์โหลดตัวอย่างไฟล์ CSV สำเร็จ', 'success');
 });
 
 function download(filename, content, mimeType) {
@@ -143,7 +391,6 @@ function handleFile(file) {
   reader.readAsText(file, 'UTF-8');
 }
 
-// คำที่บ่งบอกว่าแถวนี้คือ Header
 const HEADER_KEYWORDS = ['ข้อ','คำถาม','question','ตัวเลือก','choice','เฉลย','answer','โจทย์','no.','#'];
 
 function isHeaderRow(cells) {
@@ -151,242 +398,266 @@ function isHeaderRow(cells) {
 }
 
 function parseCsv(text) {
-  // รองรับทั้ง \r\n และ \n
-  const lines = text.trim().split(/\r?\n/).filter(l => l.trim());
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  if (lines.length === 0) { showToast('ไฟล์ว่างเปล่า', 'error'); return; }
+
+  const parsed = lines.map(line => {
+    const result = [];
+    let inQuotes = false;
+    let cur = '';
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (inQuotes && line[i + 1] === '"') { cur += '"'; i++; }
+        else { inQuotes = !inQuotes; }
+      } else if (ch === ',' && !inQuotes) {
+        result.push(cur.trim());
+        cur = '';
+      } else {
+        cur += ch;
+      }
+    }
+    result.push(cur.trim());
+    return result;
+  });
+
+  const startIndex = isHeaderRow(parsed[0]) ? 1 : 0;
   const questions = [];
 
-  // ข้ามแถว header อัตโนมัติ
-  let startIdx = 0;
-  if (isHeaderRow(splitCsvLine(lines[0]))) startIdx = 1;
+  for (let r = startIndex; r < parsed.length; r++) {
+    const row = parsed[r];
+    if (row.length < 3) continue;
 
-  for (let i = startIdx; i < lines.length; i++) {
-    const cols = splitCsvLine(lines[i]);
-    if (cols.length < 3) continue;
+    let qText, choices, ansKey;
 
-    // ตรวจว่าคอลัมน์แรกเป็น "เลขข้อ" (ตัวเลข) หรือไม่
-    // ถ้าใช่ → เลื่อน index เพื่อข้ามคอลัมน์นั้น
-    let dataStart = 0;
-    const firstCell = cols[0].trim();
-    if (/^\d+$/.test(firstCell)) {
-      // รูปแบบ: ข้อ | คำถาม | ตัวเลือก... | เฉลย
-      dataStart = 1;
+    const firstColIsNumber = /^\d+$/.test(row[0].trim());
+    const isSevenColFormat = row.length >= 7 && (firstColIsNumber || row.length > 6);
+
+    if (isSevenColFormat && firstColIsNumber) {
+      qText = row[1];
+      choices = row.slice(2, row.length - 1).filter(Boolean);
+      ansKey = row[row.length - 1];
+    } else {
+      qText = row[0];
+      choices = row.slice(1, row.length - 1).filter(Boolean);
+      ansKey = row[row.length - 1];
     }
 
-    const remaining = cols.slice(dataStart);
-    if (remaining.length < 3) continue;
+    if (!qText || choices.length < 2) continue;
 
-    const question  = remaining[0].trim();
-    if (!question) continue;
-
-    const answerRaw = remaining[remaining.length - 1].trim();
-    const choices   = remaining.slice(1, remaining.length - 1)
-                              .map(c => c.trim())
-                              .filter(Boolean);
-    if (choices.length < 2) continue;
-
-    // แปลงเฉลย: ตัวเลข 1-based หรือตัวอักษร A-D / ก-ง
-    let answerIdx = 0;
-    if (/^\d+$/.test(answerRaw)) {
-      answerIdx = parseInt(answerRaw) - 1;
-    } else if (/^[a-dA-D]$/.test(answerRaw)) {
-      answerIdx = answerRaw.toLowerCase().charCodeAt(0) - 97;
-    } else if (/^[ก-ง]$/.test(answerRaw)) {
-      answerIdx = 'กขคง'.indexOf(answerRaw);
-    }
-    answerIdx = Math.max(0, Math.min(answerIdx, choices.length - 1));
-    questions.push({ question, choices, answer: answerIdx });
+    const answer = parseAnswerKey(ansKey, choices);
+    questions.push({ question: qText, choices, answer });
   }
 
-  if (questions.length === 0) throw new Error('ไม่พบคำถามในไฟล์ — ตรวจสอบรูปแบบ CSV');
-  setQuestions(questions);
+  if (questions.length === 0) {
+    showToast('ไม่พบข้อสอบในไฟล์ กรุณาตรวจสอบรูปแบบ', 'error');
+    return;
+  }
+
+  state.questions = questions;
+  saveStoredState();
+  renderPreview();
   showToast(`นำเข้าสำเร็จ ${questions.length} ข้อ`, 'success');
 }
 
-function splitCsvLine(line) {
-  const result = [];
-  let cur = '';
-  let inQuote = false;
-  for (const ch of line) {
-    if (ch === '"') { inQuote = !inQuote; continue; }
-    if (ch === ',' && !inQuote) { result.push(cur); cur = ''; continue; }
-    cur += ch;
-  }
-  result.push(cur);
-  return result;
+function parseAnswerKey(key, choices) {
+  if (!key) return 0;
+  key = key.trim().toLowerCase();
+
+  const num = parseInt(key);
+  if (!isNaN(num) && num >= 1 && num <= choices.length) return num - 1;
+
+  const thaiKeys = ['ก', 'ข', 'ค', 'ง', 'จ', 'ฉ'];
+  const ti = thaiKeys.indexOf(key);
+  if (ti !== -1 && ti < choices.length) return ti;
+
+  const engKeys = ['a', 'b', 'c', 'd', 'e', 'f'];
+  const ei = engKeys.indexOf(key);
+  if (ei !== -1 && ei < choices.length) return ei;
+
+  const ci = choices.findIndex(c => c.toLowerCase() === key);
+  if (ci !== -1) return ci;
+
+  return 0;
 }
 
 function parseJSON(text) {
   const data = JSON.parse(text);
-  const arr = Array.isArray(data) ? data : data.questions || [];
-  const questions = arr.map(q => ({
-    question: q.question || q.q || '',
-    choices:  q.choices || q.options || [],
-    answer:   typeof q.answer === 'number' ? q.answer : (parseInt(q.answer) - 1 || 0),
-  })).filter(q => q.question && q.choices.length >= 2);
-  if (questions.length === 0) throw new Error('ไม่พบคำถามในไฟล์ JSON');
-  setQuestions(questions);
-  showToast(`นำเข้า JSON สำเร็จ ${questions.length} ข้อ`, 'success');
+  const arr = Array.isArray(data) ? data : (data.questions || []);
+  if (!arr.length) { showToast('ไม่พบข้อสอบใน JSON', 'error'); return; }
+
+  state.questions = arr.map((item, i) => ({
+    question: item.question || item.q || `ข้อที่ ${i + 1}`,
+    choices: item.choices || item.options || [],
+    answer: typeof item.answer === 'number' ? item.answer : 0,
+  }));
+
+  saveStoredState();
+  renderPreview();
+  showToast(`นำเข้าสำเร็จ ${state.questions.length} ข้อ`, 'success');
 }
 
 // ── Manual Question Builder ────────────────────────────────────────────────
-$('#addQuestionBtn').addEventListener('click', addManualQuestion);
+let manualCount = 0;
 
-function addManualQuestion(prefill = null) {
-  const idx = $('#questionBuilder').children.length;
+function addManualQuestion(data = null) {
+  manualCount++;
+  const id = manualCount;
+  const builder = $('#questionBuilder');
   const div = document.createElement('div');
   div.className = 'question-item';
+  div.id = `qItem_${id}`;
+
+  const thaiKeys = ['ก', 'ข', 'ค', 'ง'];
+  const choicesHtml = thaiKeys.map((k, i) => `
+    <div class="choice-row">
+      <span class="choice-label">${k}.</span>
+      <input type="text" class="choice-input" data-choice="${i}"
+        placeholder="ตัวเลือก ${k}" value="${data?.choices?.[i] || ''}" />
+    </div>
+  `).join('');
+
+  const answerOptions = thaiKeys.map((k, i) => `
+    <option value="${i}" ${data?.answer === i ? 'selected' : ''}>ข้อ ${k}</option>
+  `).join('');
+
   div.innerHTML = `
     <div class="question-item-header">
-      <span class="q-num">ข้อที่ ${idx + 1}</span>
-      <button class="q-remove" title="ลบข้อนี้">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-      </button>
+      <span class="q-num">คำถามที่ ${id}</span>
+      <button class="q-remove" data-id="${id}" title="ลบข้อนี้">✕ ลบ</button>
     </div>
-    <textarea class="q-input" rows="2" placeholder="พิมพ์คำถาม...">${prefill ? prefill.question : ''}</textarea>
-    <div class="choices-grid">
-      ${['ก','ข','ค','ง'].map((k, i) => `
-        <div class="choice-row">
-          <span class="choice-label">${k}.</span>
-          <input class="choice-input" placeholder="ตัวเลือก ${k}" value="${prefill ? (prefill.choices[i] || '') : ''}" />
-        </div>
-      `).join('')}
-    </div>
+    <input type="text" class="q-input" placeholder="พิมพ์โจทย์คำถาม..."
+      value="${data?.question || ''}" />
+    <div class="choices-grid">${choicesHtml}</div>
     <div class="answer-row">
-      <span class="answer-label">เฉลย:</span>
-      <select class="answer-select">
-        ${['ก','ข','ค','ง'].map((k, i) => `<option value="${i}" ${prefill && prefill.answer === i ? 'selected' : ''}>${k}</option>`).join('')}
-      </select>
+      <span class="answer-label">เฉลยที่ถูกต้อง:</span>
+      <select class="answer-select">${answerOptions}</select>
     </div>
   `;
+
   div.querySelector('.q-remove').addEventListener('click', () => {
-    div.style.animation = 'none';
-    div.style.opacity = '0';
-    div.style.transform = 'translateX(10px)';
-    div.style.transition = '0.25s ease';
-    setTimeout(() => { div.remove(); rebuildManualQuestions(); }, 250);
+    div.remove();
+    updateManualState();
   });
-  $('#questionBuilder').appendChild(div);
+
+  builder.appendChild(div);
+  div.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
+
+$('#addQuestionBtn').addEventListener('click', () => {
+  addManualQuestion();
+  updateManualState();
+});
 
 function readManualQuestions() {
   const items = $$('.question-item');
   const questions = [];
   items.forEach(item => {
     const q = item.querySelector('.q-input').value.trim();
-    const inputs = [...item.querySelectorAll('.choice-input')].map(i => i.value.trim());
-    const choices = inputs.filter(Boolean);
-    const answerIdx = parseInt(item.querySelector('.answer-select').value);
-    if (q && choices.length >= 2) {
-      questions.push({ question: q, choices, answer: answerIdx });
+    const choices = [...item.querySelectorAll('.choice-input')].map(c => c.value.trim());
+    const answer = parseInt(item.querySelector('.answer-select').value) || 0;
+    if (q && choices.filter(Boolean).length >= 2) {
+      questions.push({ question: q, choices, answer });
     }
   });
   return questions;
 }
 
-function rebuildManualQuestions() {
-  $$('.q-num').forEach((el, i) => { el.textContent = `ข้อที่ ${i + 1}`; });
-}
-
-// Sync manual questions to state
-function syncManualToState() {
+function updateManualState() {
   const manual = readManualQuestions();
-  if (manual.length > 0) setQuestions(manual);
+  if (manual.length > 0) {
+    state.questions = manual;
+    saveStoredState();
+    renderPreview();
+  }
 }
 
-// ── Set Questions ──────────────────────────────────────────────────────────
-function setQuestions(questions) {
-  state.questions = questions;
-  renderPreview();
-}
+$('#questionBuilder').addEventListener('change', updateManualState);
+$('#questionBuilder').addEventListener('input', updateManualState);
 
+// ── Preview & Settings ─────────────────────────────────────────────────────
 function renderPreview() {
-  const qs = state.questions;
-  if (qs.length === 0) {
-    $('#previewCard').style.display = 'none';
+  const card = $('#previewCard');
+  const list = $('#previewList');
+  const count = $('#questionCount');
+
+  if (state.questions.length === 0) {
+    card.style.display = 'none';
     return;
   }
-  $('#previewCard').style.display = 'block';
-  $('#questionCount').textContent = `${qs.length} ข้อ`;
 
-  const list = $('#previewList');
+  card.style.display = 'block';
+  count.textContent = `${state.questions.length} ข้อ`;
   list.innerHTML = '';
-  qs.forEach((q, i) => {
+
+  const thaiKeys = ['ก', 'ข', 'ค', 'ง', 'จ', 'ฉ'];
+  state.questions.forEach((q, i) => {
     const div = document.createElement('div');
     div.className = 'preview-item';
+    const choicesHtml = q.choices.map((c, ci) => `
+      <span class="preview-choice ${ci === q.answer ? 'correct' : ''}">
+        ${thaiKeys[ci] || ci + 1}. ${c}
+      </span>
+    `).join('');
+
     div.innerHTML = `
       <div class="preview-q">${i + 1}. ${q.question}</div>
-      <div class="preview-choices">
-        ${q.choices.map((c, ci) => `<span class="preview-choice ${ci === q.answer ? 'correct' : ''}">${['ก','ข','ค','ง'][ci] || ci+1}. ${c}</span>`).join('')}
-      </div>
-      <div class="preview-answer">✓ เฉลย: ${['ก','ข','ค','ง'][q.answer] || q.answer + 1}. ${q.choices[q.answer] || ''}</div>
+      <div class="preview-choices">${choicesHtml}</div>
     `;
     list.appendChild(div);
   });
 }
 
 $('#clearAllBtn').addEventListener('click', () => {
+  if (!confirm('ต้องการล้างข้อสอบทั้งหมดในระบบหรือไม่?')) return;
   state.questions = [];
   $('#questionBuilder').innerHTML = '';
+  saveStoredState();
   renderPreview();
   showToast('ล้างข้อสอบทั้งหมดแล้ว', 'info');
 });
 
-// ── Start Exam Setup ────────────────────────────────────────────────────────
+// Teacher saves setup
 $('#startExamSetupBtn').addEventListener('click', () => {
-  // Merge manual questions if any
   const manual = readManualQuestions();
   if (manual.length > 0 && state.questions.length === 0) {
     state.questions = manual;
-  } else if (manual.length > 0 && state.questions.length > 0) {
-    // Manual builder was used along with file – use file questions
   }
 
   if (state.questions.length === 0) {
-    showToast('กรุณาเพิ่มข้อสอบก่อน', 'error');
+    showToast('กรุณาเพิ่มข้อสอบอย่างน้อย 1 ข้อ', 'error');
     return;
   }
 
-  // Read settings
+  // Save settings
   state.examConfig.title = $('#examTitle').value.trim() || 'ข้อสอบออนไลน์';
   state.examConfig.timeLimitMinutes = parseInt($('#examTime').value) || null;
   state.examConfig.passingPercent = parseInt($('#passingScore').value) || 60;
   state.examConfig.shuffle = $('#shuffleQuestions').checked;
 
-  // Go to exam page
-  $('#examTitleDisplay').textContent = state.examConfig.title;
-  const tl = state.examConfig.timeLimitMinutes;
-  $('#infoTime').textContent = tl ? `${tl} นาที` : 'ไม่จำกัดเวลา';
-  $('#infoPassScore').textContent = `ผ่านที่ ${state.examConfig.passingPercent}%`;
-  $('#infoQuestionCount').textContent = `${state.questions.length} ข้อ`;
-  showPage(2);
+  saveStoredState();
+  showToast('บันทึกการตั้งค่าข้อสอบสำเร็จ! นักศึกษาสามารถเข้าทำข้อสอบได้ทันที', 'success');
+  showPage(0); // Return to home/portal
 });
 
 // ══════════════════════════════════════════════════════════════════════════
-//  PAGE 2 — EXAM
+//  PAGE 2 — EXAM SCREEN (STUDENT TEST TAKING)
 // ══════════════════════════════════════════════════════════════════════════
-
-// ── Register ────────────────────────────────────────────────────────────────
-$('#startExamBtn').addEventListener('click', () => {
-  const name = $('#studentName').value.trim();
-  if (!name) { showToast('กรุณากรอกชื่อก่อนเริ่มสอบ', 'error'); $('#studentName').focus(); return; }
-  state.exam.student = {
-    name,
-    id:    $('#studentId').value.trim(),
-    class: $('#studentClass').value.trim(),
-  };
-  startExam();
-});
 
 function startExam() {
-  // Prepare questions (shuffle if needed)
   let qs = [...state.questions];
   if (state.examConfig.shuffle) qs = shuffleArray(qs);
+
   state.exam.displayQuestions = qs;
   state.exam.answers = {};
   state.exam.currentIndex = 0;
   state.exam.startTime = Date.now();
 
-  // Setup timer
+  // Student badge
+  $('#examStudentIdBadge').textContent = `รหัสนักศึกษา: ${state.exam.student.id}`;
+  $('#totalQ').textContent = qs.length;
+
+  // Setup Timer
   if (state.examConfig.timeLimitMinutes) {
     state.exam.secondsLeft = state.examConfig.timeLimitMinutes * 60;
     startTimer();
@@ -395,13 +666,9 @@ function startExam() {
     $('#examTimer').style.display = 'none';
   }
 
-  $('#registerScreen').style.display = 'none';
-  $('#examScreen').style.display   = 'block';
-  $('#examStudentName').textContent = state.exam.student.name;
-  $('#totalQ').textContent = qs.length;
-
   renderQuestion();
   renderDots();
+  showPage(2);
 }
 
 function shuffleArray(arr) {
@@ -421,7 +688,7 @@ function startTimer() {
     updateTimerDisplay();
     if (state.exam.secondsLeft <= 0) {
       clearInterval(state.exam.timerInterval);
-      showToast('หมดเวลา! ส่งข้อสอบอัตโนมัติ', 'error', 5000);
+      showToast('หมดเวลาสอบ! ส่งข้อสอบอัตโนมัติ', 'error', 5000);
       doSubmit();
     }
   }, 1000);
@@ -433,7 +700,7 @@ function updateTimerDisplay() {
   const sec = (Math.abs(s) % 60).toString().padStart(2, '0');
   $('#timerDisplay').textContent = `${m}:${sec}`;
   const timerEl = $('#examTimer');
-  const total = state.examConfig.timeLimitMinutes * 60;
+  const total = (state.examConfig.timeLimitMinutes || 1) * 60;
   if (s <= 60) timerEl.className = 'exam-timer danger';
   else if (s <= total * 0.25) timerEl.className = 'exam-timer warning';
   else timerEl.className = 'exam-timer';
@@ -455,6 +722,7 @@ function renderQuestion() {
   const choiceList = $('#choicesList');
   choiceList.innerHTML = '';
   const keys = ['ก', 'ข', 'ค', 'ง', 'จ', 'ฉ'];
+
   q.choices.forEach((c, ci) => {
     const btn = document.createElement('button');
     btn.className = `choice-btn${state.exam.answers[idx] === ci ? ' selected' : ''}`;
@@ -463,7 +731,7 @@ function renderQuestion() {
     choiceList.appendChild(btn);
   });
 
-  // Trigger animation
+  // Re-trigger card animation
   const card = $('#questionCard');
   card.style.animation = 'none';
   card.offsetHeight;
@@ -471,8 +739,8 @@ function renderQuestion() {
 
   // Nav buttons
   $('#prevBtn').disabled = (idx === 0);
-  const isLast = idx === qs.length - 1;
-  $('#nextBtn').style.display  = isLast ? 'none' : 'inline-flex';
+  const isLast = (idx === qs.length - 1);
+  $('#nextBtn').style.display   = isLast ? 'none' : 'inline-flex';
   $('#submitBtn').style.display = isLast ? 'inline-flex' : 'none';
 
   updateDots();
@@ -480,27 +748,29 @@ function renderQuestion() {
 
 function selectAnswer(choiceIdx) {
   state.exam.answers[state.exam.currentIndex] = choiceIdx;
-  // Re-render choices
-  const keys = ['ก', 'ข', 'ค', 'ง', 'จ', 'ฉ'];
   $$('.choice-btn').forEach((btn, ci) => {
     btn.classList.toggle('selected', ci === choiceIdx);
-    btn.querySelector('.choice-key').style.background = ci === choiceIdx ? 'var(--purple)' : '';
-    btn.querySelector('.choice-key').style.color = ci === choiceIdx ? 'white' : '';
-    btn.querySelector('.choice-key').style.borderColor = ci === choiceIdx ? 'var(--purple)' : '';
   });
   updateDots();
 }
 
-// ── Navigation ──────────────────────────────────────────────────────────────
+// ── Exam Navigation ────────────────────────────────────────────────────────
 $('#prevBtn').addEventListener('click', () => {
-  if (state.exam.currentIndex > 0) { state.exam.currentIndex--; renderQuestion(); }
-});
-$('#nextBtn').addEventListener('click', () => {
-  const qs = state.exam.displayQuestions;
-  if (state.exam.currentIndex < qs.length - 1) { state.exam.currentIndex++; renderQuestion(); }
+  if (state.exam.currentIndex > 0) {
+    state.exam.currentIndex--;
+    renderQuestion();
+  }
 });
 
-// ── Dots ─────────────────────────────────────────────────────────────────────
+$('#nextBtn').addEventListener('click', () => {
+  const qs = state.exam.displayQuestions;
+  if (state.exam.currentIndex < qs.length - 1) {
+    state.exam.currentIndex++;
+    renderQuestion();
+  }
+});
+
+// ── Question Dots ──────────────────────────────────────────────────────────
 function renderDots() {
   const container = $('#questionDots');
   container.innerHTML = '';
@@ -508,7 +778,10 @@ function renderDots() {
     const dot = document.createElement('button');
     dot.className = 'q-dot';
     dot.textContent = i + 1;
-    dot.addEventListener('click', () => { state.exam.currentIndex = i; renderQuestion(); });
+    dot.addEventListener('click', () => {
+      state.exam.currentIndex = i;
+      renderQuestion();
+    });
     container.appendChild(dot);
   });
   updateDots();
@@ -523,7 +796,7 @@ function updateDots() {
   });
 }
 
-// ── Submit ───────────────────────────────────────────────────────────────────
+// ── Exam Submit ────────────────────────────────────────────────────────────
 $('#submitBtn').addEventListener('click', () => {
   const total = state.exam.displayQuestions.length;
   const answered = Object.keys(state.exam.answers).length;
@@ -551,33 +824,41 @@ function doSubmit() {
   const elapsed = Math.round((Date.now() - state.exam.startTime) / 1000);
   const qs = state.exam.displayQuestions;
   let correct = 0;
+
   const detail = qs.map((q, i) => {
     const userAns = state.exam.answers[i];
-    const isCorrect = userAns === q.answer;
+    const isCorrect = (userAns === q.answer);
     if (isCorrect) correct++;
-    return { question: q.question, choices: q.choices, correctAns: q.answer, userAns, isCorrect };
+    return {
+      question: q.question,
+      choices: q.choices,
+      correctAns: q.answer,
+      userAns,
+      isCorrect,
+    };
   });
 
   const total = qs.length;
-  const pct   = Math.round((correct / total) * 100);
-  const passed = pct >= state.examConfig.passingPercent;
+  const pct = Math.round((correct / total) * 100);
+  const passed = (pct >= state.examConfig.passingPercent);
 
   const resultObj = {
-    name:     state.exam.student.name,
-    id:       state.exam.student.id,
-    class:    state.exam.student.class,
+    id: state.exam.student.id,
+    name: state.exam.student.name,
     correct,
-    wrong:    total - correct,
+    wrong: total - correct,
     total,
     pct,
     passed,
     elapsed,
     detail,
-    date:     new Date().toLocaleDateString('th-TH'),
-    time:     formatSeconds(elapsed),
+    date: new Date().toLocaleDateString('th-TH'),
+    time: formatSeconds(elapsed),
   };
 
   state.results.push(resultObj);
+  saveStoredState();
+
   showResult(resultObj);
   showPage(3);
 }
@@ -585,7 +866,7 @@ function doSubmit() {
 function formatSeconds(s) {
   const m = Math.floor(s / 60);
   const sec = s % 60;
-  return `${m}:${sec.toString().padStart(2,'0')}`;
+  return `${m}:${sec.toString().padStart(2, '0')}`;
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -593,17 +874,17 @@ function formatSeconds(s) {
 // ══════════════════════════════════════════════════════════════════════════
 
 function showResult(r) {
-  $('#scorePct').textContent = r.pct + '%';
+  $('#scorePct').textContent = `${r.pct}%`;
   $('#correctCount').textContent = r.correct;
   $('#wrongCount').textContent   = r.wrong;
   $('#totalCount').textContent   = r.total;
-  $('#resultStudentName').textContent = `ผู้สอบ: ${r.name}`;
+  $('#resultStudentName').textContent = `รหัสนักศึกษา: ${r.id}`;
 
   const statusEl = $('#resultStatus');
   statusEl.className = `result-status ${r.passed ? 'pass' : 'fail'}`;
-  statusEl.textContent = r.passed ? '🎉 ผ่าน' : '❌ ไม่ผ่าน';
+  statusEl.textContent = r.passed ? '🎉 สอบผ่านเกณฑ์' : '❌ ไม่ผ่านเกณฑ์';
 
-  // Animate ring
+  // Ring Animation
   const circumference = 326.7;
   const offset = circumference - (r.pct / 100) * circumference;
   setTimeout(() => {
@@ -612,21 +893,18 @@ function showResult(r) {
 
   // Score color
   const pctEl = $('#scorePct');
-  if (r.pct >= 80)      pctEl.style.color = '#34d399';
-  else if (r.pct >= 60) pctEl.style.color = '#60a5fa';
-  else                  pctEl.style.color = '#f87171';
+  if (r.pct >= 80)      pctEl.style.color = 'var(--green)';
+  else if (r.pct >= 60) pctEl.style.color = 'var(--purple-dark)';
+  else                  pctEl.style.color = 'var(--red)';
 
-  // Review
   buildReview(r.detail);
-
-  // Report
-  updateReport();
 }
 
 function buildReview(detail) {
   const list = $('#reviewList');
   list.innerHTML = '';
   const keys = ['ก', 'ข', 'ค', 'ง', 'จ', 'ฉ'];
+
   detail.forEach((item, i) => {
     const div = document.createElement('div');
     div.className = `review-item ${item.isCorrect ? 'correct' : 'wrong'}`;
@@ -635,14 +913,15 @@ function buildReview(detail) {
       if (ci === item.correctAns) cls += ' correct-answer';
       else if (ci === item.userAns && !item.isCorrect) cls += ' wrong-answer';
       if (ci === item.userAns) cls += ' user-answer';
-      const prefix = ci === item.correctAns ? '✓ ' : ci === item.userAns && !item.isCorrect ? '✗ ' : '   ';
-      return `<div class="${cls}">${prefix}${keys[ci] || ci+1}. ${c}</div>`;
+      const prefix = (ci === item.correctAns) ? '✓ ' : (ci === item.userAns && !item.isCorrect) ? '✗ ' : '   ';
+      return `<div class="${cls}">${prefix}${keys[ci] || ci + 1}. ${c}</div>`;
     }).join('');
+
     div.innerHTML = `
       <div class="review-q">${i + 1}. ${item.question}</div>
       <div class="review-choices">${choicesHtml}</div>
-      <div class="review-result" style="color: ${item.isCorrect ? 'var(--green-light)' : 'var(--red-light)'}">
-        ${item.isCorrect ? '✓ ถูกต้อง' : `✗ ผิด — เฉลย: ${keys[item.correctAns] || item.correctAns+1}. ${item.choices[item.correctAns]}`}
+      <div class="review-result" style="color: ${item.isCorrect ? 'var(--green)' : 'var(--red)'}">
+        ${item.isCorrect ? '✓ ถูกต้อง' : `✗ ตอบผิด — เฉลย: ${keys[item.correctAns] || item.correctAns + 1}. ${item.choices[item.correctAns]}`}
       </div>
     `;
     list.appendChild(div);
@@ -651,36 +930,25 @@ function buildReview(detail) {
 
 $('#viewReviewBtn').addEventListener('click', () => {
   const sec = $('#reviewSection');
-  const isHidden = sec.style.display === 'none' || sec.style.display === '';
+  const isHidden = (sec.style.display === 'none' || sec.style.display === '');
   sec.style.display = isHidden ? 'block' : 'none';
-  $('#viewReviewBtn').textContent = isHidden ? 'ซ่อนเฉลย' : '📖 ดูเฉลย';
+  $('#viewReviewBtn').textContent = isHidden ? 'ซ่อนเฉลย' : '📖 ดูเฉลยข้อสอบ';
   if (isHidden) sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
 });
 
 $('#takeAnotherBtn').addEventListener('click', () => {
-  // Reset exam state
   state.exam.answers = {};
   state.exam.currentIndex = 0;
   if (state.exam.timerInterval) clearInterval(state.exam.timerInterval);
-
-  // Clear student form
-  $('#studentName').value = '';
-  $('#studentId').value = '';
-  $('#studentClass').value = '';
-
-  // Reset UI
-  $('#registerScreen').style.display = 'block';
-  $('#examScreen').style.display = 'none';
   $('#reviewSection').style.display = 'none';
   $('#ringFill').style.strokeDashoffset = '326.7';
-
-  showPage(2);
+  startExam();
 });
 
 $('#goToReportBtn').addEventListener('click', () => showPage(4));
 
 // ══════════════════════════════════════════════════════════════════════════
-//  PAGE 4 — REPORT
+//  PAGE 4 — REPORT (TEACHER)
 // ══════════════════════════════════════════════════════════════════════════
 
 function updateReport() {
@@ -691,6 +959,7 @@ function updateReport() {
     $('#avgScore').textContent = '0%';
     $('#passRate').textContent = '0%';
     $('#highScore').textContent = '0%';
+    renderReportTable();
     return;
   }
 
@@ -698,9 +967,9 @@ function updateReport() {
   const pass = Math.round((rs.filter(r => r.passed).length / rs.length) * 100);
   const high = Math.max(...rs.map(r => r.pct));
 
-  $('#avgScore').textContent  = avg  + '%';
-  $('#passRate').textContent  = pass + '%';
-  $('#highScore').textContent = high + '%';
+  $('#avgScore').textContent  = `${avg}%`;
+  $('#passRate').textContent  = `${pass}%`;
+  $('#highScore').textContent = `${high}%`;
 
   renderReportTable();
 }
@@ -709,20 +978,19 @@ function renderReportTable() {
   const tbody = $('#reportBody');
   tbody.innerHTML = '';
   if (state.results.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="9" class="empty-row">ยังไม่มีผลการสอบ</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-row">ยังไม่มีผลการสอบของนักศึกษา</td></tr>';
     return;
   }
+
   state.results.forEach((r, i) => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>${i + 1}</td>
-      <td><strong style="color:var(--text-primary)">${r.name}</strong></td>
-      <td>${r.id || '—'}</td>
-      <td>${r.class || '—'}</td>
+      <td><strong style="color:var(--text-primary)">${r.id || r.name}</strong></td>
       <td>${r.correct}/${r.total}</td>
-      <td><strong style="color:${r.pct >= 80 ? 'var(--green-light)' : r.pct >= 60 ? 'var(--blue-light)' : 'var(--red-light)'}">${r.pct}%</strong></td>
+      <td><strong style="color:${r.pct >= 80 ? 'var(--green)' : r.pct >= 60 ? 'var(--purple-dark)' : 'var(--red)'}">${r.pct}%</strong></td>
       <td><span class="${r.passed ? 'badge-pass' : 'badge-fail'}">${r.passed ? 'ผ่าน' : 'ไม่ผ่าน'}</span></td>
-      <td>${r.time}</td>
+      <td>${r.time} นาที</td>
       <td>${r.date}</td>
     `;
     tbody.appendChild(tr);
@@ -733,65 +1001,39 @@ function renderReportTable() {
 $('#exportExcelBtn').addEventListener('click', exportExcel);
 
 function exportExcel() {
-  if (state.results.length === 0) { showToast('ไม่มีข้อมูลที่จะส่งออก', 'error'); return; }
+  if (state.results.length === 0) {
+    showToast('ไม่มีข้อมูลผลสอบที่จะส่งออก', 'error');
+    return;
+  }
 
   const ws_data = [
-    ['#', 'ชื่อ-นามสกุล', 'รหัส', 'ห้อง/กลุ่ม', 'คะแนนที่ได้', 'คะแนนทั้งหมด', 'คะแนน (%)', 'ผลการสอบ', 'เวลาที่ใช้', 'วันที่สอบ'],
+    ['#', 'รหัสนักศึกษา', 'คะแนนที่ได้', 'คะแนนเต็ม', 'คะแนน (%)', 'ผลการสอบ', 'เวลาที่ใช้', 'วันที่สอบ'],
   ];
 
   state.results.forEach((r, i) => {
     ws_data.push([
       i + 1,
-      r.name,
-      r.id || '',
-      r.class || '',
+      r.id || r.name,
       r.correct,
       r.total,
-      r.pct + '%',
+      `${r.pct}%`,
       r.passed ? 'ผ่าน' : 'ไม่ผ่าน',
       r.time,
       r.date,
     ]);
   });
 
-  // Summary row
   ws_data.push([]);
   const avg = Math.round(state.results.reduce((s, r) => s + r.pct, 0) / state.results.length);
   const passCount = state.results.filter(r => r.passed).length;
-  ws_data.push(['สรุป', `ผู้เข้าสอบ: ${state.results.length} คน`, `ผ่าน: ${passCount} คน`, `ไม่ผ่าน: ${state.results.length - passCount} คน`, `คะแนนเฉลี่ย: ${avg}%`]);
+  ws_data.push(['สรุป', `ผู้เข้าสอบ: ${state.results.length} คน`, `ผ่าน: ${passCount} คน`, `ไม่ผ่าน: ${state.results.length - passCount} คน`, `เฉลี่ย: ${avg}%`]);
 
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet(ws_data);
-
-  // Column widths
   ws['!cols'] = [
-    { wch: 5 }, { wch: 25 }, { wch: 15 }, { wch: 15 },
-    { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 },
+    { wch: 6 }, { wch: 20 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 16 }
   ];
-
   XLSX.utils.book_append_sheet(wb, ws, 'ผลการสอบ');
-
-  // Detail sheet per student
-  state.results.forEach((r, si) => {
-    const dData = [
-      [`รายละเอียด: ${r.name}`, `คะแนน: ${r.pct}%`, r.passed ? 'ผ่าน' : 'ไม่ผ่าน'],
-      [],
-      ['#', 'คำถาม', 'คำตอบของผู้สอบ', 'เฉลยที่ถูกต้อง', 'ผล'],
-    ];
-    const keys = ['ก', 'ข', 'ค', 'ง', 'จ', 'ฉ'];
-    r.detail.forEach((d, qi) => {
-      dData.push([
-        qi + 1,
-        d.question,
-        d.userAns !== undefined ? `${keys[d.userAns] || d.userAns+1}. ${d.choices[d.userAns]}` : 'ไม่ตอบ',
-        `${keys[d.correctAns] || d.correctAns+1}. ${d.choices[d.correctAns]}`,
-        d.isCorrect ? 'ถูก' : 'ผิด',
-      ]);
-    });
-    const wsDetail = XLSX.utils.aoa_to_sheet(dData);
-    wsDetail['!cols'] = [{ wch: 5 }, { wch: 40 }, { wch: 25 }, { wch: 25 }, { wch: 8 }];
-    XLSX.utils.book_append_sheet(wb, wsDetail, `${si+1}.${r.name.substring(0,12)}`);
-  });
 
   XLSX.writeFile(wb, `ExamFlow_${state.examConfig.title}_${new Date().toLocaleDateString('th-TH').replace(/\//g,'-')}.xlsx`);
   showToast('ส่งออก Excel สำเร็จ! ✅', 'success');
@@ -799,65 +1041,49 @@ function exportExcel() {
 
 // ── Export CSV ──────────────────────────────────────────────────────────────
 $('#exportCsvBtn').addEventListener('click', () => {
-  if (state.results.length === 0) { showToast('ไม่มีข้อมูลที่จะส่งออก', 'error'); return; }
+  if (state.results.length === 0) {
+    showToast('ไม่มีข้อมูลผลสอบที่จะส่งออก', 'error');
+    return;
+  }
   const rows = [
-    ['#','ชื่อ-นามสกุล','รหัส','ห้อง','คะแนนที่ได้','คะแนนทั้งหมด','คะแนน (%)','ผลการสอบ','เวลาที่ใช้','วันที่สอบ'],
+    ['#', 'รหัสนักศึกษา', 'คะแนนที่ได้', 'คะแนนเต็ม', 'คะแนน (%)', 'ผลการสอบ', 'เวลาที่ใช้', 'วันที่สอบ'],
     ...state.results.map((r, i) => [
-      i+1, r.name, r.id||'', r.class||'', r.correct, r.total, r.pct+'%',
-      r.passed ? 'ผ่าน' : 'ไม่ผ่าน', r.time, r.date,
+      i + 1,
+      `"${r.id || r.name}"`,
+      r.correct,
+      r.total,
+      `"${r.pct}%"`,
+      `"${r.passed ? 'ผ่าน' : 'ไม่ผ่าน'}"`,
+      `"${r.time}"`,
+      `"${r.date}"`,
     ]),
   ].map(row => row.join(',')).join('\n');
 
-  download(`ExamFlow_ผล.csv`, rows, 'text/csv;charset=utf-8;');
+  download('ExamFlow_ผลสอบ.csv', rows, 'text/csv;charset=utf-8;');
   showToast('ส่งออก CSV สำเร็จ!', 'success');
 });
 
-// ── Clear Results ────────────────────────────────────────────────────────────
+// ── Clear Results ──────────────────────────────────────────────────────────
 $('#clearResultsBtn').addEventListener('click', () => {
-  if (!confirm('ต้องการล้างข้อมูลผลการสอบทั้งหมดหรือไม่?')) return;
+  if (!confirm('ต้องการล้างข้อมูลผลการสอบของนักศึกษาทั้งหมดหรือไม่?')) return;
   state.results = [];
+  saveStoredState();
   updateReport();
-  showToast('ล้างข้อมูลทั้งหมดแล้ว', 'info');
+  showToast('ล้างข้อมูลผลสอบทั้งหมดแล้ว', 'info');
 });
 
-// ── New Exam ─────────────────────────────────────────────────────────────────
+// ── New Exam Button (Teacher) ──────────────────────────────────────────────
 $('#newExamBtn').addEventListener('click', () => {
-  if (!confirm('ต้องการสร้างข้อสอบใหม่หรือไม่? ข้อสอบเดิมจะถูกลบ')) return;
-  state.questions = [];
-  state.exam = {
-    displayQuestions: [], answers: {}, currentIndex: 0,
-    student: { name: '', id: '', class: '' },
-    startTime: null, timerInterval: null, secondsLeft: null,
-  };
-  $('#questionBuilder').innerHTML = '';
-  $('#previewCard').style.display = 'none';
-  $('#registerScreen').style.display = 'block';
-  $('#examScreen').style.display = 'none';
-  $('#reviewSection').style.display = 'none';
-  $('#ringFill').style.strokeDashoffset = '326.7';
   showPage(1);
 });
 
 // ══════════════════════════════════════════════════════════════════════════
-//  INIT
+//  INITIALIZATION
 // ══════════════════════════════════════════════════════════════════════════
 (function init() {
-  // Add one blank question to manual builder
-  addManualQuestion();
-
-  // Listen to manual builder changes to update preview on demand
-  $('#questionBuilder').addEventListener('change', () => {
-    const manual = readManualQuestions();
-    if (manual.length > 0) {
-      state.questions = manual;
-      renderPreview();
-    }
-  });
-  $('#questionBuilder').addEventListener('input', () => {
-    const manual = readManualQuestions();
-    if (manual.length > 0) {
-      state.questions = manual;
-      renderPreview();
-    }
-  });
+  loadStoredState();
+  updateHomeSummary();
+  renderPreview();
+  setTeacherMode(false);
+  showPage(0); // Start on Home/Portal for student entry
 })();
