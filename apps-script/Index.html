@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>ExamFlow</title>
+  <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <style>
+    :root {
+      --purple:#7c3aed; --purple-l:#6d28d9;
+      --green:#059669;  --green-l:#047857;
+      --red:#dc2626;    --red-l:#b91c1c;
+      --blue:#2563eb;   --blue-l:#1d4ed8;
+      --bg:#f5f6fa; --card:#ffffff; --border:#e5e7eb;
+      --text:#111827; --text2:#6b7280; --text3:#9ca3af;
+      --shadow:0 2px 12px rgba(0,0,0,.08);
+      --shadow-lg:0 8px 32px rgba(0,0,0,.12);
+      --r:14px; --tr:.25s cubic-bezier(.4,0,.2,1);
+    }
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    html{font-size:16px}
+    body{font-family:'Sarabun',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding-bottom:40px}
+
+    /* Header */
+    .hdr{background:#fff;border-bottom:1px solid var(--border);
+         position:sticky;top:0;z-index:100;padding:0 24px;height:60px;display:flex;align-items:center;gap:12px;
+         box-shadow:0 1px 4px rgba(0,0,0,.06)}
+    .logo-text{font-size:1.2rem;font-weight:800;background:linear-gradient(135deg,#7c3aed,#2563eb);
+               -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+    .step-bar{display:flex;align-items:center;gap:4px;margin-left:auto}
+    .step{display:flex;align-items:center;gap:6px;padding:5px 10px;border-radius:6px;opacity:.35;font-size:.8rem;font-weight:600;color:var(--text)}
+    .step.active{opacity:1} .step.done{opacity:.7}
+    .step-n{width:22px;height:22px;border-radius:50%;background:#f3f4f6;border:1.5px solid var(--border);
+            display:flex;align-items:center;justify-content:center;font-size:.72rem;font-weight:700;color:var(--text2)}
+    .step.active .step-n{background:linear-gradient(135deg,#7c3aed,#2563eb);border:none;color:#fff}
+    .step.done .step-n{background:var(--green);border:none;color:#fff}
+    .step-div{width:20px;height:1px;background:var(--border)}
+
+    /* Main */
+    .main{max-width:860px;margin:0 auto;padding:28px 20px}
+    .page{display:none;animation:fi .35s ease}
+    .page.active{display:block}
+    @keyframes fi{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+
+    /* Hero */
+    .hero{text-align:center;margin-bottom:28px}
+    .hero h1{font-size:clamp(1.6rem,4vw,2.2rem);font-weight:800;
+             background:linear-gradient(135deg,#7c3aed,#2563eb);
+             -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:6px}
+    .hero p{color:var(--text2);font-size:1rem}
+
+    /* Card */
+    .card{background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:24px;
+          box-shadow:var(--shadow)}
+    .card+.card{margin-top:20px}
+
+    /* Loading */
+    .loading{text-align:center;padding:60px 20px;color:var(--text2)}
+    .spinner{width:40px;height:40px;border:3px solid #e5e7eb;border-top-color:#7c3aed;
+             border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px}
+    @keyframes spin{to{transform:rotate(360deg)}}
+
+    /* Form */
+    .form-g{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
+    .form-g label{font-size:.83rem;font-weight:600;color:var(--text2)}
+    .inp{background:#f9fafb;border:1.5px solid var(--border);border-radius:8px;
+         padding:12px 14px;color:var(--text);font-family:inherit;font-size:1rem;width:100%;
+         outline:none;transition:var(--tr)}
+    .inp:focus{border-color:#7c3aed;background:#faf5ff;box-shadow:0 0 0 3px rgba(124,58,237,.1)}
+    .inp-lg{padding:14px 16px;font-size:1.05rem;border-radius:10px}
+
+    /* Info row */
+    .info-row{display:flex;border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:20px;background:#f9fafb}
+    .info-cell{flex:1;padding:14px;text-align:center;border-right:1px solid var(--border);font-size:.85rem;color:var(--text2)}
+    .info-cell:last-child{border-right:none}
+    .info-ico{font-size:1.2rem;display:block;margin-bottom:4px}
+
+    /* Buttons */
+    .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;
+         padding:11px 22px;border-radius:10px;font-family:inherit;font-size:.95rem;
+         font-weight:600;cursor:pointer;border:none;transition:var(--tr);white-space:nowrap}
+    .btn:disabled{opacity:.4;cursor:not-allowed}
+    .btn:active:not(:disabled){transform:scale(.97)}
+    .btn-primary{background:linear-gradient(135deg,#7c3aed,#2563eb);color:#fff;
+                 box-shadow:0 4px 16px rgba(124,58,237,.25)}
+    .btn-primary:hover{box-shadow:0 6px 24px rgba(124,58,237,.4);transform:translateY(-1px)}
+    .btn-success{background:linear-gradient(135deg,#059669,#0d9488);color:#fff;
+                 box-shadow:0 4px 16px rgba(5,150,105,.25)}
+    .btn-success:hover{box-shadow:0 6px 24px rgba(5,150,105,.4);transform:translateY(-1px)}
+    .btn-outline{background:#fff;color:var(--text2);border:1.5px solid var(--border)}
+    .btn-outline:hover{border-color:#7c3aed;color:#7c3aed;background:#faf5ff}
+    .btn-lg{padding:14px 28px;font-size:1.05rem}
+    .btn-full{width:100%}
+
+    /* Exam topbar */
+    .topbar{display:flex;align-items:center;gap:16px;padding:14px 20px;
+            background:#fff;border:1px solid var(--border);border-radius:var(--r);
+            margin-bottom:20px;box-shadow:var(--shadow)}
+    .prog-wrap{flex:1}
+    .prog-txt{font-size:.82rem;color:var(--text2);margin-bottom:5px;text-align:center}
+    .prog-track{height:6px;background:#e5e7eb;border-radius:3px;overflow:hidden}
+    .prog-fill{height:100%;background:linear-gradient(90deg,#7c3aed,#2563eb);border-radius:3px;transition:width .4s ease}
+    .timer{display:flex;align-items:center;gap:5px;font-weight:700;font-size:.95rem;
+           padding:6px 12px;background:#f3f4f6;border-radius:8px;color:var(--text)}
+    .timer.warn{color:#d97706;background:#fffbeb} .timer.danger{color:#dc2626;background:#fef2f2;animation:pu .5s infinite}
+    @keyframes pu{0%,100%{opacity:1}50%{opacity:.4}}
+
+    /* Question */
+    .q-badge{display:inline-block;padding:3px 14px;border-radius:20px;
+             background:#ede9fe;color:#7c3aed;font-size:.78rem;font-weight:700;margin-bottom:14px}
+    .q-text{font-size:1.15rem;font-weight:700;line-height:1.7;margin-bottom:22px;color:var(--text)}
+    .choices{display:flex;flex-direction:column;gap:10px}
+    .choice{display:flex;align-items:center;gap:12px;padding:14px 18px;border-radius:10px;
+            border:1.5px solid var(--border);background:#fff;
+            cursor:pointer;font-family:inherit;font-size:.96rem;color:var(--text);
+            text-align:left;transition:var(--tr);animation:ci .25s ease both;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+    .choice:nth-child(1){animation-delay:.05s} .choice:nth-child(2){animation-delay:.10s}
+    .choice:nth-child(3){animation-delay:.15s} .choice:nth-child(4){animation-delay:.20s}
+    @keyframes ci{from{opacity:0;transform:translateX(-10px)}to{opacity:1;transform:translateX(0)}}
+    .choice:hover{border-color:#7c3aed;background:#faf5ff;transform:translateX(4px);box-shadow:0 2px 8px rgba(124,58,237,.12)}
+    .choice.sel{border-color:#7c3aed;background:#ede9fe;box-shadow:0 0 0 2px rgba(124,58,237,.2)}
+    .ckey{width:32px;height:32px;border-radius:50%;background:#f3f4f6;
+          border:1.5px solid #d1d5db;display:flex;align-items:center;justify-content:center;
+          font-size:.8rem;font-weight:800;flex-shrink:0;transition:var(--tr);color:var(--text2)}
+    .choice.sel .ckey{background:#7c3aed;border-color:#7c3aed;color:#fff}
+
+    .choice.sel .ckey{background:var(--purple);border-color:var(--purple);color:#fff}
+
+    /* Nav */
+    .nav{display:flex;align-items:center;gap:10px;margin-top:20px}
+    .dots{flex:1;display:flex;flex-wrap:wrap;gap:5px;justify-content:center}
+    .dot{width:26px;height:26px;border-radius:50%;border:1.5px solid var(--border);
+         background:transparent;cursor:pointer;font-size:.68rem;font-weight:700;
+         color:var(--text3);transition:var(--tr)}
+    .dot.ans{background:rgba(124,58,237,.2);border-color:var(--purple);color:var(--purple-l)}
+    .dot.cur{background:var(--purple);border-color:var(--purple);color:#fff}
+
+    /* Result */
+    .result-wrap{max-width:600px;margin:0 auto}
+    .result-hero{display:flex;flex-direction:column;align-items:center;gap:20px;
+                 text-align:center;padding:36px 24px}
+    .ring-wrap{position:relative;width:150px;height:150px}
+    .ring-svg{transform:rotate(-90deg)}
+    .ring-bg{fill:none;stroke:rgba(255,255,255,.08);stroke-width:8}
+    .ring-fill{fill:none;stroke:url(#rg);stroke-width:8;stroke-linecap:round;
+               stroke-dasharray:326.7;stroke-dashoffset:326.7;transition:stroke-dashoffset 1.5s ease}
+    .ring-inner{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+    .score-n{font-size:2rem;font-weight:900}
+    .score-l{font-size:.75rem;color:var(--text3)}
+    .stats{display:flex;gap:16px}
+    .stat{padding:14px 22px;border-radius:10px;text-align:center}
+    .stat.c{background:rgba(5,150,105,.15);border:1px solid rgba(52,211,153,.3)}
+    .stat.w{background:rgba(220,38,38,.15);border:1px solid rgba(248,113,113,.3)}
+    .stat.t{background:rgba(124,58,237,.15);border:1px solid rgba(167,139,250,.3)}
+    .stat-n{font-size:1.8rem;font-weight:900;margin-bottom:2px}
+    .stat.c .stat-n{color:var(--green-l)} .stat.w .stat-n{color:var(--red-l)} .stat.t .stat-n{color:var(--purple-l)}
+    .stat-l{font-size:.75rem;color:var(--text3)}
+    .status-badge{padding:9px 26px;border-radius:30px;font-size:1.05rem;font-weight:800}
+    .pass-b{background:rgba(5,150,105,.2);color:var(--green-l);border:1px solid rgba(52,211,153,.4)}
+    .fail-b{background:rgba(220,38,38,.2);color:var(--red-l);border:1px solid rgba(248,113,113,.4)}
+    .res-actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+
+    /* Review */
+    .review-item{padding:14px;border-radius:10px;border:1px solid var(--border);margin-bottom:12px}
+    .review-item.ok{border-left:4px solid var(--green);background:rgba(5,150,105,.06)}
+    .review-item.no{border-left:4px solid var(--red);background:rgba(220,38,38,.06)}
+    .r-q{font-size:.92rem;font-weight:600;margin-bottom:8px}
+    .r-c{font-size:.83rem;padding:5px 9px;border-radius:6px;color:var(--text2)}
+    .r-c.ca{background:rgba(5,150,105,.15);color:var(--green-l);font-weight:700}
+    .r-c.wa{background:rgba(220,38,38,.15);color:var(--red-l);font-weight:700}
+    .r-res{font-size:.77rem;font-weight:700;margin-top:6px}
+
+    /* Error */
+    .err-box{background:rgba(220,38,38,.12);border:1px solid rgba(248,113,113,.3);
+             border-radius:10px;padding:16px;color:var(--red-l);font-size:.9rem;margin-bottom:16px}
+
+    /* Saving */
+    .saving-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(8px);
+                    z-index:999;display:flex;align-items:center;justify-content:center;display:none}
+    .saving-box{background:var(--card);border:1px solid var(--border);border-radius:var(--r);
+                padding:32px 48px;text-align:center}
+    .saving-box .spinner{margin-bottom:12px}
+  </style>
+</head>
+<body>
+
+<!-- SVG defs -->
+<svg style="display:none"><defs>
+  <linearGradient id="rg" x1="0%" y1="0%" x2="100%" y2="0%">
+    <stop offset="0%" stop-color="#7c3aed"/><stop offset="100%" stop-color="#2563eb"/>
+  </linearGradient>
+</defs></svg>
+
+<!-- Saving overlay -->
+<div class="saving-overlay" id="savingOverlay">
+  <div class="saving-box">
+    <div class="spinner"></div>
+    <div style="color:var(--text2)">กำลังบันทึกผล...</div>
+  </div>
+</div>
+
+<!-- Header -->
+<div class="hdr">
+  <svg width="26" height="26" viewBox="0 0 28 28" fill="none">
+    <rect width="28" height="28" rx="8" fill="url(#hg)"/>
+    <path d="M8 10h12M8 14h8M8 18h10" stroke="white" stroke-width="2" stroke-linecap="round"/>
+    <circle cx="21" cy="18" r="4" fill="#4ade80"/>
+    <path d="M19.5 18l1 1 2-2" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <defs><linearGradient id="hg" x1="0" y1="0" x2="28" y2="28">
+      <stop offset="0%" stop-color="#6366f1"/><stop offset="100%" stop-color="#8b5cf6"/>
+    </linearGradient></defs>
+  </svg>
+  <span class="logo-text">ExamFlow</span>
+  <div class="step-bar">
+    <div class="step active" data-s="1"><span class="step-n">1</span><span>ลงทะเบียน</span></div>
+    <div class="step-div"></div>
+    <div class="step" data-s="2"><span class="step-n">2</span><span>ทำข้อสอบ</span></div>
+    <div class="step-div"></div>
+    <div class="step" data-s="3"><span class="step-n">3</span><span>ผลสอบ</span></div>
+  </div>
+</div>
+
+<div class="main">
+
+  <!-- ── Page 1: Register ── -->
+  <div class="page active" id="pg1">
+    <div class="hero">
+      <h1 id="examTitle">กำลังโหลด...</h1>
+      <p id="examSub">กรอกข้อมูลเพื่อเริ่มสอบ</p>
+    </div>
+
+    <div id="loadErr" class="err-box" style="display:none"></div>
+
+    <div id="loadingWrap" class="loading card">
+      <div class="spinner"></div>
+      <div>กำลังโหลดข้อสอบ...</div>
+    </div>
+
+    <div id="registerCard" class="card" style="display:none">
+      <div class="form-g">
+        <label for="sName">ชื่อ-นามสกุล *</label>
+        <input id="sName" class="inp inp-lg" placeholder="กรอกชื่อ-นามสกุล" />
+      </div>
+      <div class="form-g">
+        <label for="sId">รหัสนักศึกษา</label>
+        <input id="sId" class="inp" placeholder="ไม่บังคับ" />
+      </div>
+      <div class="form-g">
+        <label for="sClass">ห้อง / กลุ่ม</label>
+        <input id="sClass" class="inp" placeholder="ไม่บังคับ" />
+      </div>
+      <div class="info-row" id="examInfoRow">
+        <div class="info-cell"><span class="info-ico">📝</span><span id="infoQ">0 ข้อ</span></div>
+        <div class="info-cell"><span class="info-ico">✅</span><span>ผ่านที่ 60%</span></div>
+      </div>
+      <button class="btn btn-primary btn-lg btn-full" id="startBtn" onclick="startExam()">
+        ▶ เริ่มสอบ
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Page 2: Exam ── -->
+  <div class="page" id="pg2">
+    <div class="topbar">
+      <strong id="tbName" style="font-size:.95rem"></strong>
+      <div class="prog-wrap">
+        <div class="prog-txt"><span id="curQ">1</span> / <span id="totQ">0</span></div>
+        <div class="prog-track"><div class="prog-fill" id="progFill" style="width:0%"></div></div>
+      </div>
+      <div class="timer" id="timerEl" style="display:none">⏱ <span id="timerTxt">00:00</span></div>
+    </div>
+
+    <div class="card" id="qCard">
+      <div class="q-badge" id="qBadge">ข้อที่ 1</div>
+      <div class="q-text" id="qText"></div>
+      <div class="choices" id="choiceList"></div>
+    </div>
+
+    <div class="nav">
+      <button class="btn btn-outline" id="prevBtn" onclick="navigate(-1)" disabled>◀ ก่อนหน้า</button>
+      <div class="dots" id="dotsWrap"></div>
+      <button class="btn btn-primary" id="nextBtn" onclick="navigate(1)">ถัดไป ▶</button>
+      <button class="btn btn-success" id="submitBtn" onclick="confirmSubmit()" style="display:none">✔ ส่งข้อสอบ</button>
+    </div>
+  </div>
+
+  <!-- ── Page 3: Result ── -->
+  <div class="page" id="pg3">
+    <div class="result-wrap">
+      <div class="card result-hero">
+        <div class="ring-wrap">
+          <svg viewBox="0 0 120 120" width="150" height="150" class="ring-svg">
+            <circle cx="60" cy="60" r="52" class="ring-bg"/>
+            <circle cx="60" cy="60" r="52" class="ring-fill" id="ringEl"/>
+          </svg>
+          <div class="ring-inner">
+            <div class="score-n" id="scorePct">0%</div>
+            <div class="score-l">คะแนน</div>
+          </div>
+        </div>
+        <div class="stats">
+          <div class="stat c"><div class="stat-n" id="stC">0</div><div class="stat-l">ถูก</div></div>
+          <div class="stat w"><div class="stat-n" id="stW">0</div><div class="stat-l">ผิด</div></div>
+          <div class="stat t"><div class="stat-n" id="stT">0</div><div class="stat-l">ทั้งหมด</div></div>
+        </div>
+        <div id="statusBadge" class="status-badge"></div>
+        <div id="resName" style="color:var(--text2);font-size:.9rem"></div>
+        <div class="res-actions">
+          <button class="btn btn-outline" id="reviewToggle" onclick="toggleReview()">📖 ดูเฉลย</button>
+          <button class="btn btn-primary" onclick="retake()">🔄 สอบอีกครั้ง</button>
+        </div>
+      </div>
+
+      <div class="card" id="reviewSec" style="display:none;margin-top:20px">
+        <h2 style="font-size:1.1rem;font-weight:800;margin-bottom:18px">เฉลยข้อสอบ</h2>
+        <div id="reviewList"></div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /main -->
+
+<script>
+// ── State ────────────────────────────────────────────────────
+const S = {
+  questions:[], answers:{}, cur:0,
+  student:{name:'',id:'',cls:''},
+  startTime:null, timerInt:null,
+  detail:null
+};
+const KEYS=['ก','ข','ค','ง','จ','ฉ'];
+
+// ── Page control ─────────────────────────────────────────────
+function showPage(n){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.getElementById('pg'+n).classList.add('active');
+  document.querySelectorAll('[data-s]').forEach(s=>{
+    const sn=+s.dataset.s;
+    s.classList.toggle('active',sn===n);
+    s.classList.toggle('done',sn<n);
+  });
+}
+
+// ── Load exam ────────────────────────────────────────────────
+window.addEventListener('load', ()=>{
+  google.script.run
+    .withSuccessHandler(onExamLoaded)
+    .withFailureHandler(e=>showLoadErr(e.message))
+    .getExamData();
+});
+
+function onExamLoaded(res){
+  if(!res.ok){ showLoadErr(res.error); return; }
+  S.questions = res.questions;
+  document.getElementById('examTitle').textContent = res.title||'ExamFlow';
+  document.getElementById('infoQ').textContent = res.questions.length+' ข้อ';
+  document.getElementById('loadingWrap').style.display='none';
+  document.getElementById('registerCard').style.display='block';
+}
+function showLoadErr(msg){
+  document.getElementById('loadingWrap').style.display='none';
+  const e=document.getElementById('loadErr');
+  e.style.display='block';
+  e.textContent='⚠️ '+msg;
+}
+
+// ── Start exam ───────────────────────────────────────────────
+function startExam(){
+  const name=document.getElementById('sName').value.trim();
+  if(!name){alert('กรุณากรอกชื่อ-นามสกุล');return;}
+  S.student={name, id:document.getElementById('sId').value.trim(), cls:document.getElementById('sClass').value.trim()};
+  S.answers={}; S.cur=0; S.startTime=Date.now();
+  document.getElementById('tbName').textContent=name;
+  document.getElementById('totQ').textContent=S.questions.length;
+  renderDots(); renderQ();
+  showPage(2);
+}
+
+// ── Render question ──────────────────────────────────────────
+function renderQ(){
+  const q=S.questions[S.cur];
+  const pct=((S.cur+1)/S.questions.length)*100;
+  document.getElementById('progFill').style.width=pct+'%';
+  document.getElementById('curQ').textContent=S.cur+1;
+  document.getElementById('qBadge').textContent='ข้อที่ '+(S.cur+1);
+  document.getElementById('qText').textContent=q.question;
+
+  const cl=document.getElementById('choiceList');
+  cl.innerHTML='';
+  q.choices.forEach((c,ci)=>{
+    const btn=document.createElement('button');
+    btn.className='choice'+(S.answers[S.cur]===ci?' sel':'');
+    btn.innerHTML=`<span class="ckey">${KEYS[ci]||ci+1}</span><span>${c}</span>`;
+    btn.onclick=()=>pick(ci);
+    cl.appendChild(btn);
+  });
+
+  const isLast=S.cur===S.questions.length-1;
+  document.getElementById('prevBtn').disabled=S.cur===0;
+  document.getElementById('nextBtn').style.display=isLast?'none':'inline-flex';
+  document.getElementById('submitBtn').style.display=isLast?'inline-flex':'none';
+
+  // Animate card
+  const card=document.getElementById('qCard');
+  card.style.animation='none'; card.offsetHeight; card.style.animation='';
+  updateDots();
+}
+
+function pick(ci){
+  S.answers[S.cur]=ci;
+  document.querySelectorAll('.choice').forEach((b,i)=>{
+    b.classList.toggle('sel',i===ci);
+    b.querySelector('.ckey').style.background=i===ci?'var(--purple)':'';
+    b.querySelector('.ckey').style.color=i===ci?'#fff':'';
+    b.querySelector('.ckey').style.borderColor=i===ci?'var(--purple)':'';
+  });
+  updateDots();
+}
+
+function navigate(d){
+  const nx=S.cur+d;
+  if(nx>=0&&nx<S.questions.length){S.cur=nx;renderQ();}
+}
+
+// ── Dots ─────────────────────────────────────────────────────
+function renderDots(){
+  const wrap=document.getElementById('dotsWrap');
+  wrap.innerHTML='';
+  S.questions.forEach((_,i)=>{
+    const d=document.createElement('button');
+    d.className='dot'; d.textContent=i+1;
+    d.onclick=()=>{S.cur=i;renderQ();};
+    wrap.appendChild(d);
+  });
+  updateDots();
+}
+function updateDots(){
+  document.querySelectorAll('.dot').forEach((d,i)=>{
+    d.classList.toggle('cur',i===S.cur);
+    d.classList.toggle('ans',i!==S.cur&&S.answers[i]!==undefined);
+  });
+}
+
+// ── Submit ───────────────────────────────────────────────────
+function confirmSubmit(){
+  const tot=S.questions.length;
+  const ans=Object.keys(S.answers).length;
+  const msg=ans<tot
+    ?`คุณยังไม่ตอบ ${tot-ans} ข้อ ต้องการส่งข้อสอบหรือไม่?`
+    :'คุณตอบครบทุกข้อแล้ว ต้องการส่งหรือไม่?';
+  if(!confirm(msg)) return;
+  doSubmit();
+}
+
+function doSubmit(){
+  if(S.timerInt) clearInterval(S.timerInt);
+  const elapsed=Math.round((Date.now()-S.startTime)/1000);
+  document.getElementById('savingOverlay').style.display='flex';
+
+  const payload={
+    name:    S.student.name,
+    studentId: S.student.id,
+    className: S.student.cls,
+    answers: S.answers,
+    elapsedSec: elapsed
+  };
+
+  google.script.run
+    .withSuccessHandler(res=>{
+      document.getElementById('savingOverlay').style.display='none';
+      if(!res.ok){alert('เกิดข้อผิดพลาด: '+res.error);return;}
+      S.detail=res.detail;
+      showResult(res);
+      showPage(3);
+    })
+    .withFailureHandler(e=>{
+      document.getElementById('savingOverlay').style.display='none';
+      alert('เกิดข้อผิดพลาด: '+e.message);
+    })
+    .submitExam(payload);
+}
+
+// ── Result ───────────────────────────────────────────────────
+function showResult(r){
+  document.getElementById('scorePct').textContent=r.pct+'%';
+  document.getElementById('stC').textContent=r.correct;
+  document.getElementById('stW').textContent=r.wrong;
+  document.getElementById('stT').textContent=r.total;
+  document.getElementById('resName').textContent='ผู้สอบ: '+S.student.name;
+
+  // Score color
+  const sc=document.getElementById('scorePct');
+  sc.style.color=r.pct>=80?'var(--green-l)':r.pct>=60?'var(--blue-l)':'var(--red-l)';
+
+  // Badge
+  const badge=document.getElementById('statusBadge');
+  badge.textContent=r.passed?'🎉 ผ่าน':'❌ ไม่ผ่าน';
+  badge.className='status-badge '+(r.passed?'pass-b':'fail-b');
+
+  // Ring
+  const offset=326.7-(r.pct/100)*326.7;
+  setTimeout(()=>{document.getElementById('ringEl').style.strokeDashoffset=offset;},100);
+
+  // Review
+  buildReview(r.detail);
+}
+
+function buildReview(detail){
+  const list=document.getElementById('reviewList');
+  list.innerHTML='';
+  detail.forEach((item,i)=>{
+    const div=document.createElement('div');
+    div.className='review-item '+(item.isCorrect?'ok':'no');
+    let ch='';
+    item.choices.forEach((c,ci)=>{
+      let cls='r-c';
+      let pre='  ';
+      if(ci===item.correctAns){cls+=' ca';pre='✓ ';}
+      else if(ci===item.userAns&&!item.isCorrect){cls+=' wa';pre='✗ ';}
+      ch+=`<div class="${cls}">${pre}${KEYS[ci]||ci+1}. ${c}</div>`;
+    });
+    div.innerHTML=`
+      <div class="r-q">${i+1}. ${item.question}</div>
+      ${ch}
+      <div class="r-res" style="color:${item.isCorrect?'var(--green-l)':'var(--red-l)'}">
+        ${item.isCorrect?'✓ ถูกต้อง':'✗ ผิด — เฉลย: '+KEYS[item.correctAns]+'. '+item.choices[item.correctAns]}
+      </div>`;
+    list.appendChild(div);
+  });
+}
+
+function toggleReview(){
+  const sec=document.getElementById('reviewSec');
+  const hidden=sec.style.display==='none'||!sec.style.display;
+  sec.style.display=hidden?'block':'none';
+  document.getElementById('reviewToggle').textContent=hidden?'🙈 ซ่อนเฉลย':'📖 ดูเฉลย';
+  if(hidden) sec.scrollIntoView({behavior:'smooth'});
+}
+
+function retake(){
+  S.answers={}; S.cur=0;
+  document.getElementById('reviewSec').style.display='none';
+  document.getElementById('ringEl').style.strokeDashoffset='326.7';
+  document.getElementById('sName').value='';
+  document.getElementById('sId').value='';
+  document.getElementById('sClass').value='';
+  showPage(1);
+}
+</script>
+</body>
+</html>

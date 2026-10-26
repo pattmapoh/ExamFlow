@@ -1,0 +1,59 @@
+
+const SHEET_QUESTIONS = 'ข้อสอบ';   // แท็บข้อสอบ (นำเข้าจากไฟล์ CSV)
+const SHEET_RESULTS   = 'ผลสอบ';    // แท็บผลสอบ (สร้างให้อัตโนมัติ)
+const ALLOW_RETAKE    = false;      // true = รหัสนักศึกษาเดิมส่งซ้ำได้
+const LETTERS = ['ก', 'ข', 'ค', 'ง'];
+
+function doGet() {
+  return HtmlService.createHtmlOutputFromFile('Index')
+    .setTitle('แบบฝึกหัดบทที่ 2')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+function readExam_() {
+  const sh = SpreadsheetApp.getActive().getSheetByName(SHEET_QUESTIONS);
+  if (!sh) throw new Error('ไม่พบแท็บชื่อ "' + SHEET_QUESTIONS + '"');
+  return sh.getDataRange().getValues().slice(1)
+    .filter(r => r[0] !== '' && r[1] !== '')
+    .map(r => ({ n: r[0], q: r[1], o: [r[2], r[3], r[4], r[5]], k: String(r[6]).trim() }));
+}
+
+// ส่งเฉพาะโจทย์ไปหน้าเว็บ (ไม่ส่งเฉลย)
+function getQuestions() {
+  return readExam_().map(x => ({ n: x.n, q: x.q, o: x.o }));
+}
+
+function submitExam(name, sid, answers) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const ss = SpreadsheetApp.getActive();
+    const exam = readExam_();
+    let rs = ss.getSheetByName(SHEET_RESULTS);
+    if (!rs) {
+      rs = ss.insertSheet(SHEET_RESULTS);
+      rs.appendRow(['เวลาส่ง', 'ชื่อ-นามสกุล', 'รหัสนักศึกษา', 'คะแนน', 'เต็ม', 'ร้อยละ']
+        .concat(exam.map((_, i) => 'ข้อ ' + (i + 1))));
+      rs.setFrozenRows(1);
+      rs.getRange('C:C').setNumberFormat('@');
+    }
+    name = String(name).trim(); sid = String(sid).trim();
+    if (!name || !sid) return { error: 'กรุณากรอกชื่อและรหัสนักศึกษา' };
+    if (!ALLOW_RETAKE && rs.getLastRow() > 1) {
+      const ids = rs.getRange(2, 3, rs.getLastRow() - 1, 1).getValues().flat().map(String);
+      if (ids.indexOf(sid) >= 0) return { error: 'รหัสนี้ส่งข้อสอบไปแล้ว' };
+    }
+    let score = 0;
+    const review = exam.map((x, i) => {
+      const yours = answers[i] || '';
+      if (yours === x.k) score++;
+      return { n: x.n, key: x.k, yours: yours, ok: yours === x.k };
+    });
+    const pct = Math.round(score * 100 / exam.length);
+    rs.appendRow([new Date(), name, "'" + sid, score, exam.length, pct]
+      .concat(exam.map((_, i) => answers[i] || '')));
+    return { score: score, total: exam.length, pct: pct, review: review };
+  } finally {
+    lock.releaseLock();
+  }
+}
